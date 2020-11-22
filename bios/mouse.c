@@ -25,7 +25,7 @@
 #define MOUSE_STATUS 0xffe1
 #define MOUSE_IRQ 7
 
-#define CMD_TIMEOUT 32768
+#define CMD_TIMEOUT 32768U
 
 #define CMD_REFRESH 0xf3
 #define CMD_DISABLE 0xf5
@@ -35,35 +35,49 @@ extern unsigned short mouse_driver_addr[2];
 extern int mouse_driver_enabled;
 static int have_mouse;
 
+static int mouse_read(unsigned char *out)
+{
+    if (!(inb(MOUSE_STATUS) & (1 << 4)))
+        return -1;
+
+    *out = inb(MOUSE_DATA);
+
+    return 0;
+}
+
 static int mouse_cmd(unsigned char in, unsigned char *out)
 {
     int ret = -1;
-    int i = 0;
+    unsigned m = 0;
 
     outb(MOUSE_DATA, in);
 
     *out = 0xfe;
     do {
-        if (inb(MOUSE_STATUS) & (1 << 4)) {
+        if (!mouse_read(out)) {
             ret = 0;
-            *out = inb(MOUSE_DATA);
             break;
         }
-    } while (i++ < CMD_TIMEOUT);
+    } while (m++ < CMD_TIMEOUT);
 
     return ret;
 }
 
 static int wait_self_test(void)
 {
-    while (!(inb(MOUSE_STATUS) & (1 << 4)))
+    unsigned char b;
+
+    while (mouse_read(&b))
         continue;
-    unsigned char b = inb(MOUSE_DATA);
 
     if (b != 0xaa) {
         printk("self test failed (%02x)\n", b);
         return -1;
     }
+
+    /* Read the ID */
+    while (mouse_read(&b))
+        continue;
 
     return 0;
 }
@@ -74,7 +88,7 @@ int mouse_hw_init(void)
 
     unsigned char resp;
     if (mouse_cmd(0xff, &resp) || resp != 0xfa) {
-        printk("failed to reset mouse %02x\n", resp);
+        printk("mouse: not present\n");
         return -1;
     }
 
